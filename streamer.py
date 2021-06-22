@@ -31,8 +31,8 @@ class Streamer:
 
     # The event and resource keys are consistent across all streams
     # We can initialize the model with those fields populated
-    def populate_model(self, event):
-        model = self.model()
+    def populate_model(self, event, model):
+        model = model()
         model.resource_id = event["resource_id"]
         model.resource_kind = event["resource_kind"]
         model.resource_uri = event["resource_uri"]
@@ -43,16 +43,21 @@ class Streamer:
         return model
 
     def read_from_stream(self):
+        counter = 0
         for line in self.stream.iter_lines():
             if line:
                 event = json.loads(line.decode('utf-8'))
-                model_instance = self.populate_model(event.copy())
+                model_instance = self.populate_model(event.copy(), CompanyProfileStream)
+                col_model_instance = self.populate_model(event.copy(), ColumnarStream)
                 model_instance = self.event_to_model(event, model_instance)
-                col_model_instance = self.event_to_model(event, model_instance)
+                col_model_instance = self.event_to_model(event, col_model_instance)
                 # try:
                 Streamer.session.add(model_instance)
                 Streamer.session.add(col_model_instance)
-                Streamer.session.commit()
+                counter += 1
+                if counter % 10 == 0:
+                    Streamer.session.commit()
+
                 # except:
                 #     print()
                 #     Streamer.session.rollback()
