@@ -32,17 +32,14 @@ class Company(Base):
     CompanyCategory=Column(String(100))
     CompanyStatus=Column(String(70))
     CountryofOrigin=Column(String(50))
-    DissolutionDate=Column(String(10))
-    IncorporationDate=Column(String(10))
+    DissolutionDate=Column(Date)
+    IncorporationDate=Column(Date)
 
     AccountRefDay=Column(SmallInteger)
     AccountRefMonth=Column(SmallInteger)
-    NextDueDate=Column(String(10))
-    LastMadeUpDate=Column(String(10))
+    NextDueDate=Column(Date)
+    LastMadeUpDate=Column(Date)
     AccountCategory=Column(String(30))
-
-    NextDueDate=Column(String(10))
-    LastMadeUpDate=Column(String(10))
 
     NumMortCharges=Column(Integer)
     NumMortOutstanding=Column(Integer)
@@ -60,8 +57,8 @@ class Company(Base):
 
     PreviousNames = Column(ARRAY(String))
 
-    ConfStmtNextDueDate=Column(String(10))
-    ConfStmtLastMadeUpDate=Column(String(10))
+    ConfStmtNextDueDate=Column(Date)
+    ConfStmtLastMadeUpDate=Column(Date)
 
 class CompanyProfileStream(Base):
     __tablename__ = 'company_profile_stream'
@@ -140,7 +137,7 @@ class CompanyProfileStream(Base):
     event_type = Column('event.type', Text)
 
 
-class ColumnarStream(Base):
+class CompanyProfileStreamCol(Base):
     __tablename__ = 'company_profile_stream_col'
 
     company_profile_stream = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

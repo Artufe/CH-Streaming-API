@@ -1,4 +1,5 @@
 from models import *
+from funcs import date_str_to_datetime
 import csv
 
 # Function to import a data snapshot from Companies House
@@ -52,6 +53,24 @@ def import_snapshot(snapshot_location):
 
         comp["NumGenPartners"] = int(comp["NumGenPartners"])
         comp["NumLimPartners"] = int(comp["NumLimPartners"])
+
+        if comp.get("DissolutionDate"):
+            comp["DissolutionDate"] = date_str_to_datetime(comp["DissolutionDate"])
+
+        if comp.get("IncorporationDate"):
+            comp["IncorporationDate"] = date_str_to_datetime(comp["IncorporationDate"])
+
+        if comp.get("NextDueDate"):
+            comp["NextDueDate"] = date_str_to_datetime(comp["NextDueDate"])
+
+        if comp.get("LastMadeUpDate"):
+            comp["LastMadeUpDate"] = date_str_to_datetime(comp["LastMadeUpDate"])
+
+        if comp.get("ConfStmtNextDueDate"):
+            comp["ConfStmtNextDueDate"] = date_str_to_datetime(comp["ConfStmtNextDueDate"])
+
+        if comp.get("ConfStmtLastMadeUpDate"):
+            comp["ConfStmtLastMadeUpDate"] = date_str_to_datetime(comp["ConfStmtLastMadeUpDate"])
 
         c = Company(**comp)
         session.add(c)
