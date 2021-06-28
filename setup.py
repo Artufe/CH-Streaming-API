@@ -54,34 +54,20 @@ def import_snapshot(snapshot_location):
         comp["NumGenPartners"] = int(comp["NumGenPartners"])
         comp["NumLimPartners"] = int(comp["NumLimPartners"])
 
-        if comp.get("DissolutionDate"):
-            comp["DissolutionDate"] = date_str_to_datetime(comp["DissolutionDate"])
-
-        if comp.get("IncorporationDate"):
-            comp["IncorporationDate"] = date_str_to_datetime(comp["IncorporationDate"])
-
-        if comp.get("NextDueDate"):
-            comp["NextDueDate"] = date_str_to_datetime(comp["NextDueDate"])
-
-        if comp.get("LastMadeUpDate"):
-            comp["LastMadeUpDate"] = date_str_to_datetime(comp["LastMadeUpDate"])
-
-        if comp.get("ConfStmtNextDueDate"):
-            comp["ConfStmtNextDueDate"] = date_str_to_datetime(comp["ConfStmtNextDueDate"])
-
-        if comp.get("ConfStmtLastMadeUpDate"):
-            comp["ConfStmtLastMadeUpDate"] = date_str_to_datetime(comp["ConfStmtLastMadeUpDate"])
+        # Convert date string to datetime, or None
+        for x in ["DissolutionDate", "IncorporationDate", "NextDueDate",
+                  "LastMadeUpDate", "ConfStmtNextDueDate", "ConfStmtLastMadeUpDate"]:
+            if comp.get(x):
+                comp[x] = date_str_to_datetime(comp[x], '%d/%m/%Y')
+            else:
+                comp[x] = None
 
         c = Company(**comp)
         session.add(c)
 
         co += 1
         if co % 1000 == 0:
-            try:
-                session.commit()
-            except:
-                print("Rolled back ")
-                session.rollback()
+            session.commit()
 
 
 
