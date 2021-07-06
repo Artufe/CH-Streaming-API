@@ -1,14 +1,18 @@
 import os
 import sys
 import json
+import time
+
+import pytz
 import requests
 from datetime import datetime
 from pandas import json_normalize
 from sqlalchemy import create_engine
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import sessionmaker
 from multiprocessing import Process, Queue
-from models import CompanyProfileStream, CompanyProfileStreamCol, Company
-from funcs import company_event_process
+from models import CompanyProfileStream, CompanyProfileStreamCol, Company, FilingsStream, InsolvencyStream, OfficersStream, ChargesStream, PersonsStream
+from funcs import company_event_process, make_company_event_store
 
 # Base class that contains all the shared methods
 class Streamer:
@@ -28,26 +32,64 @@ class Streamer:
         self.model = model
         self.col_model = col_model
         self.event_to_model = event_function
-        # TODO add resuming from last timepoint found in DB
+        self.timezone = pytz.timezone("Europe/London")
+        # Resume from last timepoint found in db
+        last_timepoint = self.row_session.query(model.event_timepoint).order_by(model.event_timepoint.desc()).first()[0]
+        self.url = url + f"?timepoint={last_timepoint+1}"
+        print("Resuming stream from last timepoint of", last_timepoint)
+
+        # If this is the companyprofile stream, load up latest event for each company in memory
+        # Saves on querying database, which is slow and allows to keep up with realtime stream
+        # This event_store is kept updated with each new event replacing old one, or if new company appending a new key
+        if self.model == CompanyProfileStream:
+            self.events_store = make_company_event_store(self.row_session)
         self.stream = Streamer.req_session.get(url, stream=True, auth=requests.auth.HTTPBasicAuth(Streamer.api_key, ""))
 
     # The event and resource keys are consistent across all streams
     # We can initialize the model with those fields populated
-    def populate_model(self, event, model):
+    def populate_model(self, event_dict, model):
         model = model()
+        event = event_dict.copy()
         model.resource_id = event["resource_id"]
         model.resource_kind = event["resource_kind"]
         model.resource_uri = event["resource_uri"]
 
         model.event_fields_changed = event["event"].get("fields_changed", [])
         model.event_published_at = datetime.strptime(event["event"]["published_at"], "%Y-%m-%dT%H:%M:%S")
-        model.event_timepoint = event["event"]["timepoint"]
+        model.event_published_at.astimezone(self.timezone)
+
+        model.event_timepoint = int(event["event"]["timepoint"])
         return model
 
+    def compare_models(self, old_event, new_event):
+        fields_changed = []
+        # print(old_event.company_profile_stream, new_event.company_profile_stream)
+        for key, value in new_event.__dict__.items():
+            if key[0] == "_" or key in ["company_profile_stream", "resource_id", "resource_kind", "resource_uri",
+                                        "event_timepoint", "event_fields_changed", "event_published_at", "event_type",
+                                        "data_etag"]:
+                continue
+
+            # Convert all fields/keys that are supposed to be ints, to ints.
+            if key in ["data_accounts_accounting_reference_date_day", "data_accounts_accounting_reference_date_month",
+                       "data_foreign_company_details_accounts_account_period_from_day", "data_foreign_company_details_accounts_account_period_from_month",
+                       "data_foreign_company_details_accounts_account_period_to_day", "data_foreign_company_details_accounts_account_period_to_month",
+                       "data_foreign_company_details_accounts_must_file_within_months"]:
+                value = int(value)
+
+            try:
+                if old_event[key] != value:
+                    fields_changed.append(key)
+            except:
+                print(f"------------------------------{type(old_event)} \n", old_event, "\n------------------------------------------")
+                break
+
+        return fields_changed
+
     # Any new or updated data fires a event, what is done with any of the events is up for debate
-    # Currently sends relevant data to targeted.ai
-    def fire_event(self, event_name, company:Company=None, fields_changed:list=[]):
-        pass
+    # Currently planned is
+    def fire_event(self, event_name, company=None, fields_changed:list=[]):
+        print(event_name, fields_changed)
 
 class CompanyStreamer(Streamer):
 
@@ -58,67 +100,10 @@ class CompanyStreamer(Streamer):
         else:
             return False
 
-    def insert_company(self, company):
-        new_company = Company()
-        new_company.CompanyName = company.data_company_name
-        new_company.CompanyNumber = company.data_company_number
-
-        new_company.Careof = company.data_registered_office_address_care_of
-        new_company.POBox = company.data_registered_office_address_po_box
-        new_company.AddressLine1 = company.data_registered_office_address_address_line_1
-        new_company.AddressLine2 = company.data_registered_office_address_address_line_2
-        new_company.PostTown = company.data_registered_office_address_locality
-        new_company.County = company.data_registered_office_address_region
-        new_company.Country = company.data_registered_office_address_country
-        new_company.PostCode = company.data_registered_office_address_postal_code
-
-        if company.data_type:
-            new_company.CompanyCategory = company.data_type.replace("-", " ").title()
-        else:
-            new_company.CompanyCategory = company.data_type
-
-        new_company.CompanyStatus = company.data_company_status
-        new_company.CountryofOrigin = company.data_registered_office_address_country
-        new_company.DissolutionDate = company.data_date_of_cessation
-        new_company.IncorporationDate = company.data_date_of_creation
-
-        new_company.AccountRefDay = company.data_accounts_accounting_reference_date_day
-        new_company.AccountRefMonth = company.data_accounts_accounting_reference_date_month
-        new_company.NextDueDate = company.data_accounts_next_due
-        new_company.LastMadeUpDate = company.data_accounts_last_accounts_made_up_to
-        new_company.AccountCategory = company.data_accounts_last_accounts_type
-
-        try:
-            new_company.SICCode1 = company.data_sic_codes.pop()
-        except IndexError:
-            new_company.SICCode1 = None
-
-        try:
-            new_company.SICCode2 = company.data_sic_codes.pop()
-        except IndexError:
-            new_company.SICCode2 = None
-
-        try:
-            new_company.SICCode3 = company.data_sic_codes.pop()
-        except IndexError:
-            new_company.SICCode3 = None
-
-        try:
-            new_company.SICCode4 = company.data_sic_codes.pop()
-            new_company.SICCode4 = company.data_sic_codes.pop()
-        except IndexError:
-            new_company.SICCode4 = None
-
-        # Dont bother assigning previous names attrib, as its a new company and will always be empty
-
-        new_company.ConfStmtNextDueDate = company.data_confirmation_statement_next_due
-        new_company.ConfStmtLastMadeUpDate = company.data_confirmation_statement_last_made_up_to
-        Streamer.row_session.add(new_company)
-        Streamer.row_session.commit()
-
+    # Update the snapshot data to be current, and track field changes
+    # Skip all attributes that will not change, such as company number, incorp data, etc
     def update_company(self, company):
-        return True
-
+        pass
 
     def read_from_stream(self):
         counter = 0
@@ -126,47 +111,79 @@ class CompanyStreamer(Streamer):
             if line:
                 event = json.loads(line.decode('utf-8'))
                 # Normal companyprofile model instance
-                company = self.populate_model(event.copy(), self.model)
-                company = self.event_to_model(event.copy(), company)
+                company = self.populate_model(event, self.model)
+                company = self.event_to_model(event, company)
 
                 # Columnar companyprofile instance model instance
-                company_col = self.populate_model(event.copy(), self.col_model)
-                company_col = self.event_to_model(event.copy(), company_col)
+                # company_col = self.populate_model(event, self.col_model)
+                # company_col = self.event_to_model(event, company_col)
 
-                Streamer.row_session.add(company)
-                Streamer.col_session.add(company_col)
-                Streamer.row_session.commit()
-                counter += 1
-                if counter % 10000 == 0:
-                    Streamer.col_session.commit()
-                    Streamer.row_session.execute('''TRUNCATE TABLE public.company_profile_stream CONTINUE IDENTITY RESTRICT;''')
+                # Streamer.col_session.add(company_col)
 
-                # Company has been saved, now do the postprocessing
+                # Check if a event for this company exists in the event_store
+                previous_event = self.events_store.get(company.data_company_number, False)
 
-                # Check if company exists in the Company table
-                if self.company_exists(company.data_company_number):
-                    # Company does exist, update it
-                    print("Existing company, updating", company.data_company_number)
-                    fields_changed = self.update_company(company)
-                    self.fire_event("companyprofile.update", fields_changed=fields_changed, company=company)
-                else:
-                    # Company does not yet exist in our companies table, add it
-                    print("New company, inserting to companies table", company.data_company_number)
-                    self.insert_company(company)
+                self.events_store[company.data_company_number] = company.__dict__
+
+                if not previous_event:
                     self.fire_event("companyprofile.new", company=company)
 
+                # If a previous event was found, compare old row with new row and fire off event if any fields are changed
+                if previous_event:
+                    changed_fields = self.compare_models(previous_event, company)
+                    if changed_fields:
+                        self.fire_event("companyprofile.update", fields_changed=changed_fields, company=company)
+
+                Streamer.row_session.add(company)
+                Streamer.row_session.commit()
 
 
 
+                counter += 1
+                # if counter % 10000 == 0:
+                #     Streamer.col_session.commit()
+                #     Streamer.row_session.query(CompanyProfileStream).delete()
+                #     Streamer.row_session.commit()
+
+
+
+class GenericTempStreamer(Streamer):
+
+    def read_from_stream(self):
+        for line in self.stream.iter_lines():
+            if line:
+                event = json.loads(line.decode('utf-8'))
+                # Normal companyprofile model instance
+                model = self.populate_model(event, self.model)
+                model.company_number = event["resource_uri"].split("/")[2]
+
+                model.data = event["data"]
+                Streamer.row_session.add(model)
+                Streamer.row_session.commit()
 
 if __name__ == "__main__":
     # q = Queue()
     stream_to_launch = sys.argv[1]
-    if stream_to_launch == "company":
-        # Company profile stream
-        streamer = CompanyStreamer("https://stream.companieshouse.gov.uk/companies?timepoint=29818343", CompanyProfileStream, CompanyProfileStreamCol, company_event_process)
+    # Infinite loop here, because the stream can end and needs restarting in those cases
+    while True:
+        if stream_to_launch == "company":
+            # Company profile stream
+            # Resume from last comp in company table timepoint = 30090073
+            streamer = CompanyStreamer("https://stream.companieshouse.gov.uk/companies", CompanyProfileStream, CompanyProfileStreamCol, company_event_process)
 
-    streamer.read_from_stream()
+        # Temporary
+        elif stream_to_launch == "filing":
+            streamer = GenericTempStreamer("https://stream.companieshouse.gov.uk/filings", FilingsStream, CompanyProfileStreamCol, company_event_process)
+        elif stream_to_launch == "insolvency":
+            streamer = GenericTempStreamer("https://stream.companieshouse.gov.uk/insolvency-cases", InsolvencyStream, CompanyProfileStreamCol, company_event_process)
+        elif stream_to_launch == "officer":
+            streamer = GenericTempStreamer("https://stream.companieshouse.gov.uk/officers", OfficersStream, CompanyProfileStreamCol, company_event_process)
+        elif stream_to_launch == "charges":
+            streamer = GenericTempStreamer("https://stream.companieshouse.gov.uk/charges", ChargesStream, CompanyProfileStreamCol, company_event_process)
+        elif stream_to_launch == "persons":
+            streamer = GenericTempStreamer("https://stream.companieshouse.gov.uk/persons-with-significant-control", PersonsStream, CompanyProfileStreamCol, company_event_process)
+
+        streamer.read_from_stream()
 
 
 

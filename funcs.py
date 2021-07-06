@@ -1,18 +1,23 @@
 import uuid
-
-from models import Company
+import copy
+from models import Company, CompanyProfileStream, CompanyProfileStreamCol
 from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-def date_str_to_datetime(date_str, date_format='%Y-%m-%d'):
+def date_str_to_datetime(date_str, date_format='%Y-%m-%d', as_date=True):
     if date_str:
-        date_obj = datetime.strptime(date_str, date_format)
-        return date_obj
+        datetime_obj = datetime.strptime(date_str, date_format)
+        if as_date:
+            return datetime_obj.date()
+        return datetime_obj
     else:
         return None
 
 
-def company_event_process(event, model):
-    data = event["data"]
+def company_event_process(event_dict, model):
+    event = copy.deepcopy(event_dict)
+    data = event.get("data")
     if data.get("accounts"):
         accounts = data["accounts"]
         if accounts.get("accounting_reference_date"):
@@ -25,7 +30,9 @@ def company_event_process(event, model):
 
         model.data_accounts_next_due = date_str_to_datetime(accounts.pop("next_due", None))
         model.data_accounts_next_made_up_to = date_str_to_datetime(accounts.pop("next_made_up_to", None))
-        model.data_accounts_overdue = accounts.pop("overdue", None)
+        model.data_accounts_overdue = accounts.pop("overdue", False)
+    else:
+        model.data_accounts_overdue = False
 
     if data.get("annual_return"):
         annual_return = data["annual_return"]
@@ -51,7 +58,9 @@ def company_event_process(event, model):
         model.data_confirmation_statement_last_made_up_to = date_str_to_datetime(conf.pop("last_made_up_to", None))
         model.data_confirmation_statement_next_due = date_str_to_datetime(conf.pop("next_due", None))
         model.data_confirmation_statement_next_made_up_to = date_str_to_datetime(conf.pop("next_made_up_to", None))
-        model.data_confirmation_statement_overdue = conf.pop("overdue", None)
+        model.data_confirmation_statement_overdue = conf.pop("overdue", False)
+    else:
+        model.data_confirmation_statement_overdue = False
 
     model.data_date_of_cessation = date_str_to_datetime(data.pop("date_of_cessation", None))
     model.data_date_of_creation = date_str_to_datetime(data.pop("date_of_creation", None))
@@ -89,10 +98,10 @@ def company_event_process(event, model):
 
         model.data_foreign_company_details_registration_number = fcd.pop("registration_number", None)
 
-    model.data_has_been_liquidated = data.pop("has_been_liquidated", None)
-    model.data_has_charges = data.pop("has_charges", None)
-    model.data_has_insolvency_history = data.pop("has_insolvency_history", None)
-    model.data_is_community_interest_company = data.pop("is_community_interest_company", None)
+    model.data_has_been_liquidated = data.pop("has_been_liquidated", False)
+    model.data_has_charges = data.pop("has_charges", False)
+    model.data_has_insolvency_history = data.pop("has_insolvency_history", False)
+    model.data_is_community_interest_company = data.pop("is_community_interest_company", False)
     model.data_jurisdiction = data.pop("jurisdiction", None)
     model.data_last_full_members_list_date = date_str_to_datetime(data.pop("last_full_members_list_date", None))
     if data.get("links"):
@@ -115,10 +124,10 @@ def company_event_process(event, model):
         model.data_registered_office_address_premises = addr.pop("premises", None)
         model.data_registered_office_address_region = addr.pop("region", None)
 
-    model.data_registered_office_is_in_dispute = data.pop("registered_office_is_in_dispute", None)
+    model.data_registered_office_is_in_dispute = data.pop("registered_office_is_in_dispute", False)
     model.data_sic_codes = data.pop("sic_codes", [])
     model.data_type = data.pop("type", None)
-    model.data_undeliverable_registered_office_address = data.pop("undeliverable_registered_office_address", None)
+    model.data_undeliverable_registered_office_address = data.pop("undeliverable_registered_office_address", False)
 
     # Can print data here, to make sure that all attributes are grabbed. Any non popped attribute will show up
     # Currently not grabbed attributes:
@@ -127,3 +136,21 @@ def company_event_process(event, model):
     # print("\n---------------------", data, "\n---------------------")
 
     return model
+
+def make_company_event_store(session):
+    event_store = {}
+
+    all_normal_rows = session.query(CompanyProfileStream).distinct(CompanyProfileStream.data_company_number) \
+        .order_by(CompanyProfileStream.data_company_number, CompanyProfileStream.event_published_at.desc()).all()
+
+    all_columnar_rows = session.query(CompanyProfileStreamCol).distinct(CompanyProfileStreamCol.data_company_number) \
+        .order_by(CompanyProfileStreamCol.data_company_number, CompanyProfileStreamCol.event_published_at.desc()).all()
+
+    # Since columnar stores older data, populate dict with these values first
+    for row in all_columnar_rows:
+        event_store[row.data_company_number] = row.__dict__
+
+    for row in all_normal_rows:
+        event_store[row.data_company_number] = row.__dict__
+
+    return event_store

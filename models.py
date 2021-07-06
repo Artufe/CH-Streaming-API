@@ -73,15 +73,15 @@ class CompanyProfileStream(Base):
     data_accounts_last_accounts_type = Column('data.accounts.last_accounts.type', Text)
     data_accounts_next_due = Column('data.accounts.next_due', Date)
     data_accounts_next_made_up_to = Column('data.accounts.next_made_up_to', Date)
-    data_accounts_overdue = Column('data.accounts.overdue', Boolean)
+    data_accounts_overdue = Column('data.accounts.overdue', Boolean, default=False)
     data_annual_return_last_made_up_to = Column('data.annual_return.last_made_up_to', Date)
     data_annual_return_next_due = Column('data.annual_return.next_due', Date)
     data_annual_return_next_made_up_to = Column('data.annual_return.next_made_up_to', Date)
-    data_annual_return_overdue = Column('data.annual_return.overdue', Boolean)
+    data_annual_return_overdue = Column('data.annual_return.overdue', Boolean, default=False)
     data_branch_company_details_business_activity = Column('data.branch_company_details.business_activity', Text)
     data_branch_company_details_parent_company_name = Column('data.branch_company_details.parent_company_name', Text)
     data_branch_company_details_parent_company_number = Column('data.branch_company_details.parent_company_number', Text)
-    data_can_file = Column('data.can_file', Boolean)
+    data_can_file = Column('data.can_file', Boolean, default=False)
     data_company_name = Column('data.company_name', Text)
     data_company_number = Column('data.company_number', Text)
     data_company_status = Column('data.company_status', Text)
@@ -89,12 +89,12 @@ class CompanyProfileStream(Base):
     data_confirmation_statement_last_made_up_to = Column('data.confirmation_statement.last_made_up_to', Date)
     data_confirmation_statement_next_due = Column('data.confirmation_statement.next_due', Date)
     data_confirmation_statement_next_made_up_to = Column('data.confirmation_statement.next_made_up_to', Date)
-    data_confirmation_statement_overdue = Column('data.confirmation_statement.overdue', Boolean)
+    data_confirmation_statement_overdue = Column('data.confirmation_statement.overdue', Boolean, default=False)
     data_date_of_cessation = Column('data.date_of_cessation', Date)
     data_date_of_creation = Column('data.date_of_creation', Date)
     data_etag = Column('data.etag', Text)
-    data_foreign_company_details_accounting_requirement_foreign_account_type = Column('data.foreign_company_details.accounting_requirement.foreign_account_type', Text)
-    data_foreign_company_details_accounting_requirement_terms_of_account_publication = Column('data.foreign_company_details.accounting_requirement.terms_of_account_publication', Text)
+    data_foreign_company_details_accounting_requirement_foreign_account_type = Column('data.foreign_company_details.accounting_requirement.foreign_acc', Text)
+    data_foreign_company_details_accounting_requirement_terms_of_account_publication = Column('data.foreign_company_details.accounting_requirement.terms_of_ac', Text)
     data_foreign_company_details_accounts_account_period_from_day = Column('data.foreign_company_details.accounts.account_period_from.day', SmallInteger)
     data_foreign_company_details_accounts_account_period_from_month = Column('data.foreign_company_details.accounts.account_period_from.month', SmallInteger)
     data_foreign_company_details_accounts_account_period_to_day = Column('data.foreign_company_details.accounts.account_period_to.day', SmallInteger)
@@ -103,14 +103,14 @@ class CompanyProfileStream(Base):
     data_foreign_company_details_business_activity = Column('data.foreign_company_details.business_activity', Text)
     data_foreign_company_details_company_type = Column('data.foreign_company_details.company_type', Text)
     data_foreign_company_details_governed_by = Column('data.foreign_company_details.governed_by', Text)
-    data_foreign_company_details_is_a_credit_finance_institution = Column('data.foreign_company_details.is_a_credit_finance_institution', Boolean)
+    data_foreign_company_details_is_a_credit_finance_institution = Column('data.foreign_company_details.is_a_credit_finance_institution', Boolean, default=False)
     data_foreign_company_details_originating_registry_country = Column('data.foreign_company_details.originating_registry.country', Text)
     data_foreign_company_details_originating_registry_name = Column('data.foreign_company_details.originating_registry.name', Text)
     data_foreign_company_details_registration_number = Column('data.foreign_company_details.registration_number', Text)
-    data_has_been_liquidated = Column('data.has_been_liquidated', Boolean)
-    data_has_charges = Column('data.has_charges', Boolean)
-    data_has_insolvency_history = Column('data.has_insolvency_history', Boolean)
-    data_is_community_interest_company = Column('data.is_community_interest_company', Boolean)
+    data_has_been_liquidated = Column('data.has_been_liquidated', Boolean, default=False)
+    data_has_charges = Column('data.has_charges', Boolean, default=False)
+    data_has_insolvency_history = Column('data.has_insolvency_history', Boolean, default=False)
+    data_is_community_interest_company = Column('data.is_community_interest_company', Boolean, default=False)
     data_jurisdiction = Column('data.jurisdiction', Text)
     data_last_full_members_list_date = Column('data.last_full_members_list_date', Date)
     data_links_persons_with_significant_control = Column('data.links.persons_with_significant_control', Text)
@@ -127,10 +127,10 @@ class CompanyProfileStream(Base):
     data_registered_office_address_postal_code = Column('data.registered_office_address.postal_code', Text)
     data_registered_office_address_premises = Column('data.registered_office_address.premises', Text)
     data_registered_office_address_region = Column('data.registered_office_address.region', Text)
-    data_registered_office_is_in_dispute = Column('data.registered_office_is_in_dispute', Boolean)
+    data_registered_office_is_in_dispute = Column('data.registered_office_is_in_dispute', Boolean, default=False)
     data_sic_codes = Column('data.sic_codes', ARRAY(Text()))
     data_type = Column('data.type', Text)
-    data_undeliverable_registered_office_address = Column('data.undeliverable_registered_office_address', Boolean)
+    data_undeliverable_registered_office_address = Column('data.undeliverable_registered_office_address', Boolean, default=False)
     event_fields_changed = Column('event.fields_changed', ARRAY(Text()))
     event_published_at = Column('event.published_at', DateTime(True))
     event_timepoint = Column('event.timepoint', Integer)
@@ -216,34 +216,34 @@ class CompanyProfileStreamCol(Base):
 # class CompanyProfileStream(CompanyProfileStream):
 #     __tablename__ = 'company_profile_stream_col'
 
-# class BaseStream(object):
-#     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-#     resource_id = Column(String(67))
-#     resource_kind = Column(String(25))
-#     resource_uri = Column(String(100))
-#     data = Column(JSON)
-#     event_timepoint = Column(BigInteger)
-#     event_published_at = Column(String(23))
-#     event_type = Column(String(15))
-#
-#
-# class CompanyProfileStream(BaseStream, Base):
-#     __tablename__ = "company_profile_stream"
-#
-# class FilingsStream(BaseStream, Base):
-#     __tablename__ = "filings_stream"
-#
-# class InsolvencyStream(BaseStream, Base):
-#     __tablename__ = "insolvency_stream"
-#
-# class ChargesStream(BaseStream, Base):
-#     __tablename__ = "charges_stream"
-#
-# class OfficersStream(BaseStream, Base):
-#     __tablename__ = "officers_stream"
-#
-# class PersonsStream(BaseStream, Base):
-#     __tablename__ = "persons_stream"
+class BaseStream(object):
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(String(67))
+    resource_kind = Column(String(25))
+    resource_uri = Column(String(100))
+    company_number = Column(String(10))
+    data = Column(JSON)
+    event_fields_changed = Column('event.fields_changed', ARRAY(Text()))
+    event_timepoint = Column(BigInteger)
+    event_published_at = Column(DateTime(True))
+    event_type = Column(String(15))
+
+
+
+class FilingsStream(BaseStream, Base):
+    __tablename__ = "filings_stream"
+
+class InsolvencyStream(BaseStream, Base):
+    __tablename__ = "insolvency_stream"
+
+class ChargesStream(BaseStream, Base):
+    __tablename__ = "charges_stream"
+
+class OfficersStream(BaseStream, Base):
+    __tablename__ = "officers_stream"
+
+class PersonsStream(BaseStream, Base):
+    __tablename__ = "persons_stream"
 
 
 # class CompanyProfileStream2(BaseStream, Base):
