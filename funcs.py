@@ -14,7 +14,6 @@ def date_str_to_datetime(date_str, date_format='%Y-%m-%d', as_date=True):
     else:
         return None
 
-
 def company_event_process(event_dict, model):
     event = copy.deepcopy(event_dict)
     data = event.get("data")
@@ -148,9 +147,15 @@ def make_company_event_store(session):
 
     # Since columnar stores older data, populate dict with these values first
     for row in all_columnar_rows:
-        event_store[row.data_company_number] = row.__dict__
+        row_dict = copy.deepcopy(row.__dict__)
+        del row_dict["_sa_instance_state"]
+        event_store[row.data_company_number] = row_dict
 
     for row in all_normal_rows:
-        event_store[row.data_company_number] = row.__dict__
+        row_dict = copy.deepcopy(row.__dict__)
+        del row_dict["_sa_instance_state"]
+        event_store[row.data_company_number] = row_dict
+
+    print("There are", len(event_store), "rows loaded in event store. Memory usage in Mb:", getsizeof(event_store)/1000000)
 
     return event_store
