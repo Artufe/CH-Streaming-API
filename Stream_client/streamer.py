@@ -7,11 +7,8 @@ import time
 import pytz
 import requests
 from datetime import datetime
-from pandas import json_normalize
 from sqlalchemy import create_engine
-from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import sessionmaker
-from multiprocessing import Process, Queue
 from models import CompanyProfileStream, Company, FilingsStream, InsolvencyStream, OfficersStream, ChargesStream, PersonsStream
 from funcs import company_event_process, make_company_event_store
 

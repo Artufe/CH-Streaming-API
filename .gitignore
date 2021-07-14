@@ -2,4 +2,6 @@
 __pycache__/
 # Virtual Enviorment
 venv/
+# Companies house API keys
+Stream_client/ch_api_keys.txt
 

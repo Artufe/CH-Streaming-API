@@ -1,14 +1,13 @@
 import time
 from collections import deque
 
-from models import *
-from funcs import date_str_to_datetime, company_event_process
+from Stream_client.models import *
+from Stream_client.funcs import date_str_to_datetime, company_event_process
 import csv
-from streamer import CompanyStreamer
+from Stream_client.streamer import CompanyStreamer
 import json
 from aiohttp import ClientSession, TCPConnector, BasicAuth
 import asyncio
-import sys
 import pypeln as pl
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
