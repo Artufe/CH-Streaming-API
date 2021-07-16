@@ -3,8 +3,10 @@ import os
 import sys
 import json
 import time
+import uuid
 
 import pytz
+import pika
 import requests
 from datetime import datetime
 from sqlalchemy import create_engine
@@ -24,26 +26,34 @@ class Streamer:
     Session = sessionmaker(bind=engine)
     session = Session()
 
+    # Connect to to RabbitMQ
+    connection = pika.BlockingConnection(pika.URLParameters('amqp://arthur:FlaskTubCupp@localhost:5672/%2F'))
+    channel = connection.channel()
+    channel.queue_declare("CHStreamQ", arguments={"x-message-ttl": 300000})
+
     # model: SQLAlchemy model class appropriate to the stream type (url)
     # event_function: the function that maps the raw event JSON to model
     def __init__(self, url, model, event_function):
+        self.url = url
         self.model = model
         self.event_to_model = event_function
+
         # Resume from last timepoint found in db
         last_timepoint = self.session.query(model.event_timepoint).order_by(model.event_timepoint.desc()).first()[0]
-        self.url = url
         print("Resuming stream from last timepoint of", last_timepoint)
 
         # If this is the companyprofile stream, load up latest event for each company in memory
         # Saves on querying database, which is slow and allows to keep up with realtime stream
-        # This event_store is kept updated with each new event replacing old one, or if new company appending a new key
+        # This event_store is kept updated with each new event replacing old one,
+        # or if new company detected it does the appending of a new key
         if self.model == CompanyProfileStream:
             self.events_store = make_company_event_store(self.session)
 
+        # Actually connect to stream from Companies House
         self.stream = Streamer.req_session.get(url + f"?timepoint={last_timepoint+1}", stream=True, auth=requests.auth.HTTPBasicAuth(Streamer.api_key, ""))
 
     # The event and resource keys are consistent across all streams
-    # We can initialize the model with those fields populated
+    # Initialize the model with those fields populated
     def populate_model(self, event_dict, model):
         model = model()
         event = event_dict.copy()
@@ -56,11 +66,15 @@ class Streamer:
         model.event_published_at.astimezone(self.timezone)
 
         model.event_timepoint = int(event["event"]["timepoint"])
+        if self.model == CompanyProfileStream:
+            model.company_profile_stream = uuid.uuid4()
+        else:
+            model.id = uuid.uuid4()
+
         return model
 
     def compare_models(self, old_event, new_event):
         fields_changed = []
-        # print(old_event.company_profile_stream, new_event.company_profile_stream)
         for key, value in new_event.__dict__.items():
             if key[0] == "_" or key in ["company_profile_stream", "resource_id", "resource_kind", "resource_uri",
                                         "event_timepoint", "event_fields_changed", "event_published_at", "event_type",
@@ -74,23 +88,33 @@ class Streamer:
                        "data_foreign_company_details_accounts_must_file_within_months"]:
                 value = int(value)
 
-            # try:
             if old_event[key] != value:
                 fields_changed.append(key)
-            # except:
-            #     print(f"------------------------------{type(old_event)} \n", old_event, "\n------------------------------------------")
-            #     break
 
         return fields_changed
 
+    # Populate message with elements that are common between all of the streams
+    def base_message_constructor(self, model, company_number):
+        message = {"stream": self.url.split("/")[-1],
+                   "event_type": None,
+                   "event_published_at": model.event_published_at.strftime("%Y-%m-%d %H:%M:%S"),
+                   "event_id": str(model.company_profile_stream) if self.model == CompanyProfileStream else str(model.id),
+                   "company_number": company_number}
 
-    # Any new or updated data fires a event, what is done with any of the events is up for debate
-    # Currently planned is
-    def fire_event(self, event_name, company=None, fields_changed:list=[]):
-        if fields_changed:
-            print(event_name, fields_changed, company.data_company_number)
-        else:
-            print(event_name, company.data_company_number)
+        return message
+
+    # Takes a dictionary and sends it as a message to RabbitMQ instance
+    def send_message(self, message):
+        try:
+            self.channel.basic_publish(exchange='',
+                                       routing_key='CHStreamQ',
+                                       body=json.dumps(message))
+        except pika.exceptions.StreamLostError:
+            # Re-establish the connection
+            print("RabbitMQ connection dropped, re-creating")
+            self.connection = pika.BlockingConnection(pika.URLParameters('amqp://arthur:FlaskTubCupp@localhost:5672/%2F'))
+            self.channel = self.connection.channel()
+            self.send_message(message)
 
     def read_from_stream(self):
         for line in self.stream.iter_lines():
@@ -98,7 +122,6 @@ class Streamer:
                 event = json.loads(line.decode('utf-8'))
                 # Extract the base attributes such as event_published_at, resource_id etc
                 model = self.populate_model(event, self.model)
-
                 model = self.pipeline(event, model)
 
                 self.session.add(model)
@@ -110,9 +133,10 @@ class Streamer:
             try:
                 self.read_from_stream()
             except (requests.exceptions.ChunkedEncodingError, requests.exceptions.StreamConsumedError) as e:
-                print("Stream error encountered, restarting stream. ", e)
+                print("Stream error encountered,", e)
                 last_timepoint = self.session.query(self.model.event_timepoint)\
                                 .order_by(self.model.event_timepoint.desc()).first()[0]
+                print("Restarting stream from last timepoint of", last_timepoint)
                 self.stream = Streamer.req_session.get(self.url + f"?timepoint={last_timepoint+1}", stream=True, auth=requests.auth.HTTPBasicAuth(Streamer.api_key, ""))
 
 
@@ -134,14 +158,22 @@ class CompanyStreamer(Streamer):
 
         self.events_store[company.data_company_number] = copy.deepcopy(company.__dict__)
 
+        # Construct the base of a message for RabbitMQ
+        message = self.base_message_constructor(company, company.data_company_number)
+
         if not previous_event:
-            self.fire_event("companyprofile.new", company=company)
+            message["event_type"] = "company.new"
 
         # If a previous event was found, compare old row with new row and fire off event if any fields are changed
         if previous_event:
+            message["event_type"] = "company.update"
             changed_fields = self.compare_models(previous_event, company)
             if changed_fields:
-                self.fire_event("companyprofile.update", fields_changed=changed_fields, company=company)
+                message["changed_fields"] = ",".join(changed_fields)
+            else:
+                message["changed_fields"] = ""
+
+        self.send_message(message)
 
         return company
 
@@ -152,6 +184,19 @@ class GenericTempStreamer(Streamer):
     def pipeline(self, event, model):
         model.company_number = event["resource_uri"].split("/")[2]
         model.data = event["data"]
+
+        # Construct the base of a message for RabbitMQ
+        message = self.base_message_constructor(model, model.company_number)
+
+        if self.model == FilingsStream:
+            if "description" in event["data"]:
+                message["event_type"] = event["data"]["description"]
+            elif "associated_filings" in event["data"] and len(event["data"]["associated_filings"]) == 0:
+                message["event_type"] = event["data"]["associated_filings"][0]["description"]
+            else:
+                print("Unknown event type for ", str(model.id))
+
+        self.send_message(message)
 
         return model
 
