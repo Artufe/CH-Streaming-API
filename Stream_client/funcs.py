@@ -1,6 +1,7 @@
 import copy
 from models import Company, CompanyProfileStream, CompanyProfileStreamCol
 from datetime import datetime
+import sys
 
 def date_str_to_datetime(date_str, date_format='%Y-%m-%d', as_date=True):
     if date_str:
@@ -153,6 +154,6 @@ def make_company_event_store(session):
         del row_dict["_sa_instance_state"]
         event_store[row.data_company_number] = row_dict
 
-    print("There are", len(event_store), "rows loaded in event store. Memory usage in Mb:", getsizeof(event_store)/1000000)
+    print("There are", len(event_store), "rows loaded in event store. Memory usage in Mb:", sys.getsizeof(event_store)/1000000)
 
     return event_store
