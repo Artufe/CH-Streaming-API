@@ -29,7 +29,7 @@ class Streamer:
     # Connect to to RabbitMQ
     connection = pika.BlockingConnection(pika.URLParameters('amqp://arthur:FlaskTubCupp@localhost:5672/%2F'))
     channel = connection.channel()
-    channel.queue_declare("CHStreamQ", arguments={"x-message-ttl": 300000})
+    channel.exchange_declare(exchange='CHFanout', exchange_type='fanout', durable=False)
 
     # model: SQLAlchemy model class appropriate to the stream type (url)
     # event_function: the function that maps the raw event JSON to model
@@ -39,8 +39,7 @@ class Streamer:
         self.event_to_model = event_function
 
         # Resume from last timepoint found in db
-        last_timepoint = self.session.query(model.event_timepoint).order_by(model.event_timepoint.desc()).first()[0]
-        print("Resuming stream from last timepoint of", last_timepoint)
+        last_timepoint = self.get_last_timepoint()
 
         # If this is the companyprofile stream, load up latest event for each company in memory
         # Saves on querying database, which is slow and allows to keep up with realtime stream
@@ -51,6 +50,19 @@ class Streamer:
 
         # Actually connect to stream from Companies House
         self.stream = Streamer.req_session.get(url + f"?timepoint={last_timepoint+1}", stream=True, auth=requests.auth.HTTPBasicAuth(Streamer.api_key, ""))
+        print("Resuming stream from last timepoint of", last_timepoint)
+
+
+    def get_last_timepoint(self):
+        try:
+            last_timepoint = self.session.query(self.model.event_timepoint).order_by(self.model.event_timepoint.desc()).first()[0]
+        except TypeError:
+            with self.engine.connect() as con:
+                table = str(self.model.__table__) + "_col"
+                result = con.execute(f"SELECT event_timepoint FROM {table} ORDER BY event_timepoint DESC LIMIT 1")
+                for timepoint in result:
+                    last_timepoint = timepoint[0]
+        return last_timepoint
 
     # The event and resource keys are consistent across all streams
     # Initialize the model with those fields populated
@@ -88,8 +100,11 @@ class Streamer:
                        "data_foreign_company_details_accounts_must_file_within_months"]:
                 value = int(value)
 
-            if old_event[key] != value:
-                fields_changed.append(key)
+            try:
+                if old_event[key] != value:
+                    fields_changed.append(key)
+            except:
+                print(old_event)
 
         return fields_changed
 
@@ -106,12 +121,11 @@ class Streamer:
     # Takes a dictionary and sends it as a message to RabbitMQ instance
     def send_message(self, message):
         try:
-            self.channel.basic_publish(exchange='',
-                                       routing_key='CHStreamQ',
+            self.channel.basic_publish(exchange='CHFanout',
+                                       routing_key='',
                                        body=json.dumps(message))
         except pika.exceptions.StreamLostError:
             # Re-establish the connection
-            print("RabbitMQ connection dropped, re-creating")
             self.connection = pika.BlockingConnection(pika.URLParameters('amqp://arthur:FlaskTubCupp@localhost:5672/%2F'))
             self.channel = self.connection.channel()
             self.send_message(message)
@@ -134,10 +148,7 @@ class Streamer:
                 self.read_from_stream()
             except (requests.exceptions.ChunkedEncodingError, requests.exceptions.StreamConsumedError) as e:
                 print("Stream error encountered,", e)
-                last_timepoint = self.session.query(self.model.event_timepoint)\
-                                .order_by(self.model.event_timepoint.desc()).first()[0]
-                print("Restarting stream from last timepoint of", last_timepoint)
-                self.stream = Streamer.req_session.get(self.url + f"?timepoint={last_timepoint+1}", stream=True, auth=requests.auth.HTTPBasicAuth(Streamer.api_key, ""))
+                last_timepoint = self.get_last_timepoint()
 
 
 class CompanyStreamer(Streamer):
