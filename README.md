@@ -27,3 +27,7 @@ Formatting of the JSON messages within RabbitMQ and the internal stream broadcas
         Follows format of the database table, with underscores replacing dots <br>
         Present when type = company.update.</li>
 </ul>
+
+Update: 2024-02
+This project is most likely outdated and not compatible.
+For more info & support please email abuikis@gmail.com
